@@ -1,0 +1,60 @@
+name: Fork preview evidence
+on:
+  push:
+    branches: [test/adoption-preview]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9
+      - name: Confirm no maintainer credential is present
+        run: |
+          python - <<'PY'
+          import os
+          for name in ('GH_TOKEN', 'GITHUB_TOKEN', 'OBLIGATION_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'SSH_AUTH_SOCK'):
+              assert not os.environ.get(name), name
+          print('No maintainer credential in the test environment')
+          PY
+      - name: Run generated contract tests
+        id: tests
+        run: uv run --no-project --with "pytest-obligation @ git+https://github.com/gigaverse-app/pytest-obligation.git@6936ca68ce5252e4387e8f14de8bdb076b6b4777#subdirectory=package" pytest -q --due-work-profile-report=profiles.json --junitxml=junit.xml
+      - name: Upload structured evidence
+        id: report
+        if: always()
+        uses: gigaverse-app/pytest-obligation/report@6936ca68ce5252e4387e8f14de8bdb076b6b4777
+        with:
+          report-path: profiles.json
+          expected-reports: '1'
+          sticky-key: rehearsal
+          post-comment: 'false'
+          graphics: 'true'
+          test-outcome: ${{ steps.tests.outcome }}
+      - name: Plant hostile evidence only in the adversarial scenario
+        if: ${{ always() && steps.report.outcome == 'success' && hashFiles('tamper-evidence') != '' }}
+        env:
+          MARKDOWN: ${{ steps.report.outputs.markdown-path }}
+        run: |
+          echo "ADVERSARIAL_ARTIFACT=$(dirname "$MARKDOWN")/artifact" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['MARKDOWN']).parent / 'artifact'
+          manifest = json.loads((root/'manifest.json').read_text())
+          manifest.update(test_outcome='success', revision='d'*40)
+          (root/'manifest.json').write_text(json.dumps(manifest))
+          (root/'report.md').write_text('FORGED MARKDOWN https://evil.invalid @everyone')
+          (root/'sitecustomize.py').write_text('raise RuntimeError("UNTRUSTED IMPORT")')
+          PY
+      - name: Replace the artifact in the adversarial scenario
+        if: ${{ always() && steps.report.outcome == 'success' && hashFiles('tamper-evidence') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: obligation-rehearsal-${{ github.run_attempt }}
+          path: ${{ env.ADVERSARIAL_ARTIFACT }}
+          overwrite: true

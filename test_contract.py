@@ -19,10 +19,19 @@ class TestCatalog:
 
 # This implementation never derives an obligation from desired state. Its binding
 # passes the ownership guard, but the generated profile-F contract tests fail.
+def broken_derivation_binding():
+    # ARRANGE: create a fresh in-memory domain with desired state but no records.
+    deriver = EdgeTriggeredDeriver()
+    # REAL PRODUCTION: bind the library's deliberately broken derive implementation.
+    # EXTERNAL SEAM: none; all state belongs to this in-memory reference domain.
+    # OBSERVE: outstanding and record_of expose whether desired work was discovered.
+    return materialising_derivation_binding(deriver)
+
+
 broken_contract = ObligationContract(
     name="broken derivation: desired work is never discovered",
     profiles={**{p: NotApplicable("Outside this contract.") for p in Profile}, Profile.F: Claim()},
-    derivation=lambda: materialising_derivation_binding(EdgeTriggeredDeriver()),
+    derivation=broken_derivation_binding,
 )
 
 
